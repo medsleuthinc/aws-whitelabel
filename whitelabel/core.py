@@ -58,6 +58,8 @@ this.log_bucket = os.environ['LOG_BUCKET']+".s3.amazonaws.com"
 
 this.dry_run = 'DRY_RUN' in os.environ and os.environ['DRY_RUN']
 
+this.ignore_missing_services = 'IGNORE_MISSING_SERVICES' in os.environ and os.environ['IGNORE_MISSING_SERVICES']
+
 
 # Set this to the Route53 Zone if you wish to
 # create all domain names there (for testing) instead
@@ -202,6 +204,17 @@ def discover_clients(defs):
         this.clients[client['domain'].lower()] = {}
 
         for subdomain in client['subdomains']:
+
+            if subdomain['service'] not in this.services and this.ignore_missing_services:
+                print("skipping %s.%s%s because service %s not supported by infrastructure " % (
+                    subdomain['name'],
+                    client['domain'],
+                    this.sandbox_dot,
+                    subdomain['service']
+                ))
+
+                continue
+
 
             this.clients[client['domain'].lower()][subdomain['name'].lower()] = subdomain
 
