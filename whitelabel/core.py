@@ -118,26 +118,26 @@ def discover_services(defs):
         if 'serverless' in service:
             eprint("%s (serverless %s): " % (service['name'], service['serverless']))
 
-            l = boto3.client('cloudformation').describe_stacks(
-                StackName=service['serverless']
-            )
+            svcStack = boto3.client('cloudformation').describe_stacks( StackName=service['serverless'] )
 
+            url = ''
+            if svcStack and 'Outputs' in svcStack[0]:
+               svcStackOut = svcStack['Stacks'][0]['Outputs']
+               endPts = [ itm for itm in svcStackOut if itm['OutputKey'] == 'ServiceEndpoint' ]
+               if endPts:
+                  url = (endPts[0]['OutputValue'])
+                  this.services[service['name']] = {'url': url, 'type':'api'}
+                  eprint("%s\n" % url)
 
-            l = l['Stacks'][0]['Outputs']
-            url = ([item for item in l if item['OutputKey'] == 'ServiceEndpoint'][0]['OutputValue'])
+            if not url:
+               this.services[service['name']] = { 'type': 'NoAPI' }
 
-            this.services[service['name']] = {'url': url, 'type':'api'}
-
-
-            eprint("%s\n" % url)
             continue
 
         if 'endpoint' in service:
             eprint("%s (endpoint): %s\n" % (service['name'], service['endpoint']))
 
             url = service['endpoint']
-
-
             this.services[service['name']] = url
 
             continue
@@ -172,13 +172,13 @@ def discover_services(defs):
 
             stack,output = service['lambda-arn'].split(':')
 
-            l = boto3.client('cloudformation').describe_stacks(
+            svcStackOut = boto3.client('cloudformation').describe_stacks(
                 StackName=stack
             )
 
 
-            l = l['Stacks'][0]['Outputs']
-            arn = ([item for item in l if item['OutputKey'] == output][0]['OutputValue'])
+            svcStackOut = svcStackOut['Stacks'][0]['Outputs']
+            arn = ([item for item in svcStackOut if item['OutputKey'] == output][0]['OutputValue'])
 
             this.services[service['name']] = arn
 
