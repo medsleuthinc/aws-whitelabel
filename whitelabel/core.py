@@ -1,14 +1,23 @@
-# -*- coding:utf-8 -*-
+#!/usr/bin/python
+# -*- coding: utf-8 -*-
+#
 
-# from . import helpers
 
-from pprint import pprint
 import sys
 import os, re
 from ruamel.yaml import YAML
+import logging
+import traceback
 from urllib.parse import urlparse
 import json
+from pprint import pprint
 import boto3
+
+logger = logging.getLogger(__name__)
+
+# quiet urllib3, & botocore logging
+logging.getLogger("urllib3").setLevel(logging.WARNING)
+logging.getLogger("botocore").setLevel(logging.WARNING)
 
 if 'NO_COLOR' in os.environ:
     class bcolors:
@@ -96,6 +105,33 @@ def read_yaml_config(f):
     yaml=YAML(typ='safe')
     return yaml.load(open(f, 'r'))
 
+def slsURL(slsId=''):
+    """
+    determines the serverless endpoint URL
+    :param svcName: the "service" name  eg; 'bjs'
+    :param slsId: the service Id eg; service['serverless'], 'bjs-229'
+    :return: the service endpoint URL, if available, otherwise an empty string
+    """
+    url = ''
+    try:
+        response = boto3.client('cloudformation').describe_stacks(StackName=slsId)
+
+    except:
+        exs = traceback.format_exc()
+        logger.warning(exs)
+        response = {}
+
+    if 'Stacks' in response:
+        for stack in response['Stacks']:
+            if 'Outputs' in stack:
+                stackOutputs = stack['Outputs']
+
+                for opp in stackOutputs:
+                    if opp['OutputKey'] == 'ServiceEndpoint':
+                        url = opp['OutputValue']
+
+    return url
+
 
 def discover_services(defs):
     """
@@ -110,30 +146,56 @@ def discover_services(defs):
 
     for service in defs:
         # service is a dict containing service description
+        # eg;
+        # {
+        #     "name": "demo",
+        #     "s3": "com-medsleuth-j229-demo"
+        # }
+        # ... or ...
+        # {
+        #     "folder": "{$subdomain}.{$domain}",
+        #     "name": "static",
+        #     "s3": "com-medsleuth-j229-static"
+        # }
+        # ... or ...
+        # {
+        #     "lambda-arn": "cf-j229:RedirectMobileB3LambdaFunctionQualifiedArn",
+        #     "name": "redirectMobileB3"
+        # }
+        # ... or ...
+        # {
+        #     "name": "bjs",
+        #     "serverless": "bjs-j229"
+        # }
+        # ... or ...
+        # {
+        #     "name": "b3",
+        #     "s3": "com-medsleuth-j229-b3-public"
+        # }
+        # ... or ...
+        # {
+        #     "name": "b3-admin",
+        #     "s3": "com-medsleuth-j229-b3-admin-public"
+        # }
+
+        logger.debug("service: {}".format(json.dumps(service, indent=3, sort_keys=True)))
 
         if 'serverless' in service:
             eprint("%s (serverless %s): " % (service['name'], service['serverless']))
+            url = slsURL(slsId=service['serverless'])
+            if url:
+                this.services[service['name']] = {'url': url, 'type': 'api'}
+                eprint("%s\n" % url)
 
-            l = boto3.client('cloudformation').describe_stacks(
-                StackName=service['serverless']
-            )
+            else:
+                this.services[service['name']] = {'type': 'NoAPI'}
 
-
-            l = l['Stacks'][0]['Outputs']
-            url = ([item for item in l if item['OutputKey'] == 'ServiceEndpoint'][0]['OutputValue'])
-
-            this.services[service['name']] = {'url': url, 'type':'api'}
-
-
-            eprint("%s\n" % url)
             continue
 
         if 'endpoint' in service:
             eprint("%s (endpoint): %s\n" % (service['name'], service['endpoint']))
 
             url = service['endpoint']
-
-
             this.services[service['name']] = url
 
             continue
@@ -168,13 +230,13 @@ def discover_services(defs):
 
             stack,output = service['lambda-arn'].split(':')
 
-            l = boto3.client('cloudformation').describe_stacks(
+            svcStackOut = boto3.client('cloudformation').describe_stacks(
                 StackName=stack
             )
 
 
-            l = l['Stacks'][0]['Outputs']
-            arn = ([item for item in l if item['OutputKey'] == output][0]['OutputValue'])
+            svcStackOut = svcStackOut['Stacks'][0]['Outputs']
+            arn = ([item for item in svcStackOut if item['OutputKey'] == output][0]['OutputValue'])
 
             this.services[service['name']] = arn
 
@@ -1130,6 +1192,46 @@ def lookup_sandbox_zone():
     """ 
     Will go and look for the most appropriate zone for sandbox
     """
+
+
+class CWFormatter(logging.Formatter):
+
+   def __init__(self, fmt):
+      logging.Formatter.__init__(self, fmt)
+
+   def format(self, record):
+      result = logging.Formatter.format(self, record)
+      return result.replace('\n', '\r')
+
+
+def initBreezeLogging(levelDesignator=None):
+   rootLogger = logging.getLogger()
+
+   for lH in rootLogger.handlers:
+      rootLogger.removeHandler(lH)
+
+   newH = logging.StreamHandler(sys.stdout)
+
+   newH.setFormatter(
+      CWFormatter(
+         '%(asctime)s - %(name)s - %(levelname)s - %(funcName)s - %(message)s'
+      )
+   ) # newH.setFormatter
+
+   rootLogger.addHandler(newH)
+
+   logLevel = os.environ.get("LOG_LEVEL")
+
+   if logLevel:
+      rootLogger.setLevel(logLevel)
+
+   elif levelDesignator:
+      rootLogger.setLevel(levelDesignator)
+
+   else:
+      rootLogger.setLevel(logging.DEBUG)
+
+   return rootLogger
 
 
 def main():
